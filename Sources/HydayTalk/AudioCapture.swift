@@ -80,6 +80,7 @@ final class AudioCapture {
             directory = folder
         }
         let input = engine.inputNode; let format = input.outputFormat(forBus: 0)
+        MeterDiagnostics.shared.start(sampleRate: format.sampleRate, channels: format.channelCount)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             cancel(); throw TalkError("找不到麥克風。請在「系統設定 → 聲音 → 輸入」選擇麥克風。")
         }

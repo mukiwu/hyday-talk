@@ -91,7 +91,8 @@ struct VoiceBarView: View {
     @Binding var expanded: Bool
     @State private var history: [Double] = []
     @State private var sampleCount = 0
-    private let sampler = Timer.publish(every: 0.06, on: .main, in: .common).autoconnect()
+    // Shared so the timer survives re-renders; one owned by the view restarted on every model update and never fired.
+    private static let sampler = Timer.publish(every: 0.06, on: .main, in: .common).autoconnect()
     private static let historyLength = 26
     var actions = VoiceBarActions()
     private var terminal: Bool { state.phase == .done || state.phase == .failed }
@@ -107,7 +108,8 @@ struct VoiceBarView: View {
             .overlay(RoundedRectangle(cornerRadius: radius).stroke(Palette.border, lineWidth: 1))
             .padding(2).font(Typography.font(.caption)).lineSpacing(Typography.paragraphSpacing)
             .foregroundStyle(Palette.ink).tint(Palette.action).preferredColorScheme(.light).focusEffectDisabled()
-            .onReceive(sampler) { _ in
+            .onReceive(Self.sampler) { _ in
+                MeterDiagnostics.shared.recordTick(recording: state.phase == .recording)
                 guard state.phase == .recording else { if !history.isEmpty { history = [] }; return }
                 sampleCount += 1
                 let sample = VoiceMeter.display(level: state.level) * VoiceMeter.jitter(sample: sampleCount)
@@ -210,13 +212,17 @@ struct VoiceBarView: View {
                         Text(state.transcript.isEmpty ? "請開始說話" : state.transcript).font(Typography.font(.body)).textSelection(.enabled)
                     } else if terminal {
                         if !state.result.isEmpty { Text(state.result).font(Typography.font(.body)).textSelection(.enabled) }
-                        if !state.notice.isEmpty { Text(state.notice).foregroundStyle(Palette.muted).textSelection(.enabled) }
                     } else {
                         Text(state.phase == .preparing ? "請允許麥克風與必要的辨識權限。" : "聽寫或翻譯送出文字後會關閉面板，其他結果保留供複製。")
                             .foregroundStyle(Palette.muted)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxHeight: .infinity)
+            // Outside the scroll view, so a long result cannot push it under the buttons.
+            if terminal, !state.notice.isEmpty {
+                Text(state.notice).foregroundStyle(Palette.muted).textSelection(.enabled)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true).help(state.notice)
+            }
             if terminal {
                 HStack(spacing: 8) {
                     if state.missedInsertion, !state.result.isEmpty {

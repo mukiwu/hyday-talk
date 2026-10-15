@@ -98,7 +98,7 @@ final class AppModel: ObservableObject {
         loaded = true
         if settings != originalSettings { saveSettings() }
         audio.onTranscript = { [weak self] text in self?.transcript = text }
-        audio.onLevel = { [weak self] level in self?.level = level }
+        audio.onLevel = { [weak self] level in self?.level = level; MeterDiagnostics.shared.record(level: level) }
         audio.onFailure = { [weak self] error in
             guard let self, self.phase == .recording else { return }
             self.notice = error.localizedDescription; self.finish()
@@ -318,6 +318,7 @@ final class AppModel: ObservableObject {
         recordingTimer?.invalidate(); recordingTimer = nil
         let spokeAt = Date()
         elapsed = spokeAt.timeIntervalSince(started); audio.stop(); level = 0
+        MeterDiagnostics.shared.report(elapsed: elapsed)
         let duration = elapsed; let current = sessionID; let snapshot = sessionSettings
         let voiceAction = action; let inputTarget = target; let hints = sessionHints; let context = sessionContext
         phase = .transcribing; onPanelChange?()
@@ -606,3 +607,4 @@ final class AppModel: ObservableObject {
         }
     }
 }
+
