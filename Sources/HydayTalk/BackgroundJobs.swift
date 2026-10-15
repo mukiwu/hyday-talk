@@ -29,11 +29,11 @@ final class TextModelInstaller: ObservableObject {
     }
 }
 
-/// Checks GitHub for a newer release and downloads its DMG. Installing stays
-/// with the user: the finished DMG is only opened when they ask.
+/// Checks GitHub for a newer release and downloads its DMG. When asked, it swaps the new
+/// version in and relaunches; where the app cannot be replaced, the DMG is opened instead.
 @MainActor
 final class AppUpdater: ObservableObject {
-    enum State: Equatable { case idle, available, downloading(Double), ready(URL), failed(String) }
+    enum State: Equatable { case idle, available, downloading(Double), ready(URL), installing, failed(String) }
     @Published private(set) var update: AppUpdate?
     @Published private(set) var state: State = .idle
     private var lastCheck: Date?
@@ -82,6 +82,28 @@ final class AppUpdater: ObservableObject {
     func openInstaller() {
         guard case .ready(let file) = state else { return }
         NSWorkspace.shared.open(file)
+    }
+
+    /// False when the app sits somewhere this user cannot write, so the DMG has to be opened instead.
+    var canRestartToUpdate: Bool { AppInstaller.canReplace(Bundle.main.bundleURL) }
+
+    /// Checks the downloaded version, quits, and lets a helper swap it in and relaunch.
+    func restartToUpdate() {
+        guard case .ready(let file) = state else { return }
+        state = .installing
+        Task {
+            do {
+                let current = Bundle.main.bundleURL
+                guard let team = await AppInstaller.team(of: current) else { throw TalkError("目前的版本沒有簽名，請改用安裝檔更新。") }
+                let staging = FileManager.default.temporaryDirectory.appendingPathComponent("Hyday Talk Update", isDirectory: true)
+                let staged = try await AppInstaller.extractApp(from: file, into: staging)
+                try await AppInstaller.verify(candidate: staged, team: team)
+                try AppInstaller.replaceAfterExit(pid: ProcessInfo.processInfo.processIdentifier, staged: staged, installed: current)
+                NSApp.terminate(nil)
+            } catch {
+                state = .failed((error as? TalkError)?.message ?? "無法自動更新，請改用安裝檔。")
+            }
+        }
     }
 }
 

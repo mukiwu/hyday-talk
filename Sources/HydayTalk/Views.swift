@@ -640,8 +640,18 @@ private struct SidebarJobs: View {
                 }
             }
         case .ready:
-            job(symbol: "checkmark.circle", title: "\(update.version) 已下載", detail: "結束 Hyday Talk 後，把新版拖進應用程式資料夾") {
-                Button("打開安裝檔", action: updater.openInstaller).buttonStyle(AlignButtonStyle(kind: .primary)).controlSize(.small)
+            if updater.canRestartToUpdate {
+                job(symbol: "checkmark.circle", title: "\(update.version) 已下載", detail: "重新啟動後就會換成新版") {
+                    Button("重新啟動並更新", action: updater.restartToUpdate).buttonStyle(AlignButtonStyle(kind: .primary)).controlSize(.small)
+                }
+            } else {
+                job(symbol: "checkmark.circle", title: "\(update.version) 已下載", detail: "結束 Hyday Talk 後，把新版拖進應用程式資料夾") {
+                    Button("打開安裝檔", action: updater.openInstaller).buttonStyle(AlignButtonStyle(kind: .primary)).controlSize(.small)
+                }
+            }
+        case .installing:
+            job(symbol: "arrow.triangle.2.circlepath", title: "正在更新 \(update.version)", detail: "正在檢查新版，完成後會自動重新啟動") {
+                ProgressView().progressViewStyle(.linear)
             }
         case .failed(let message):
             job(symbol: "exclamationmark.circle", title: "有新版本 \(update.version)", detail: message) {
