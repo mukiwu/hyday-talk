@@ -42,8 +42,13 @@ final class AppInstallerTests: XCTestCase {
     }
 
     func testUnsignedCandidateIsRejected() async throws {
-        let app = try fakeApp(marker: "unsigned")
-        do { try await AppInstaller.verify(candidate: app, team: "ABCDE12345"); XCTFail("unsigned app must be rejected") }
+        // A newer copy of the same app, so only the missing signature can reject it.
+        let app = try fakeApp(marker: "unsigned"), current = try fakeApp(marker: "current")
+        for (url, version) in [(app, "0.1.6"), (current, "0.1.5")] {
+            try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "io.hyday.talk", "CFBundleShortVersionString": version],
+                                               format: .xml, options: 0).write(to: url.appendingPathComponent("Contents/Info.plist"))
+        }
+        do { try await AppInstaller.verify(candidate: app, current: current, team: "ABCDE12345"); XCTFail("unsigned app must be rejected") }
         catch let error as TalkError { XCTAssertTrue(error.message.contains("簽名")) }
     }
 
@@ -57,7 +62,7 @@ final class AppInstallerTests: XCTestCase {
         let running = Process(); running.executableURL = URL(fileURLWithPath: "/bin/sleep"); running.arguments = ["1"]
         try running.run()
 
-        try AppInstaller.replaceAfterExit(pid: running.processIdentifier, staged: staged, installed: installed, launcher: launcher.path)
+        try AppInstaller.replaceAfterExit(pid: running.processIdentifier, staged: staged, installed: installed, team: nil, launcher: launcher.path)
         XCTAssertEqual(marker(installed), "old", "nothing is replaced while the app is still running")
         running.waitUntilExit()
         let deadline = Date().addingTimeInterval(10)
@@ -74,5 +79,44 @@ final class AppInstallerTests: XCTestCase {
         let installed = try fakeApp(marker: "old")
         XCTAssertTrue(AppInstaller.canReplace(installed))
         XCTAssertFalse(AppInstaller.canReplace(URL(fileURLWithPath: "/System/Applications/Calculator.app")))
+    }
+}
+
+final class AppInstallerIdentityTests: XCTestCase {
+    private func app(id: String, version: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".app")
+        try FileManager.default.createDirectory(at: url.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+        let plist: [String: Any] = ["CFBundleIdentifier": id, "CFBundleShortVersionString": version]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: url.appendingPathComponent("Contents/Info.plist"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testOnlyANewerCopyOfTheSameAppIsAccepted() throws {
+        let current = try app(id: "io.hyday.talk", version: "0.1.5")
+        XCTAssertTrue(AppInstaller.isSameAppAndNewer(try app(id: "io.hyday.talk", version: "0.1.6"), than: current))
+        XCTAssertFalse(AppInstaller.isSameAppAndNewer(try app(id: "io.hyday.talk", version: "0.1.5"), than: current))
+        XCTAssertFalse(AppInstaller.isSameAppAndNewer(try app(id: "io.hyday.talk", version: "0.1.4"), than: current))
+        XCTAssertFalse(AppInstaller.isSameAppAndNewer(try app(id: "com.other.app", version: "9.0"), than: current))
+    }
+
+    func testSwapIsRolledBackWhenTheInstalledCopyFailsItsSignatureCheck() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let installed = root.appendingPathComponent("Hyday Talk.app"), staged = root.appendingPathComponent("stage/Hyday Talk.app")
+        for (url, marker) in [(installed, "old"), (staged, "tampered")] {
+            try FileManager.default.createDirectory(at: url.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+            try Data(marker.utf8).write(to: url.appendingPathComponent("Contents/marker"))
+        }
+        let launched = root.appendingPathComponent("launched")
+        let launcher = root.appendingPathComponent("launcher")
+        try Data("#!/bin/sh\necho \"$1\" > '\(launched.path)'\n".utf8).write(to: launcher)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: launcher.path)
+
+        try AppInstaller.replaceAfterExit(pid: 999_999, staged: staged, installed: installed, team: "ABCDE12345", launcher: launcher.path)
+        let deadline = Date().addingTimeInterval(10)
+        while !FileManager.default.fileExists(atPath: launched.path), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        XCTAssertEqual(try String(contentsOf: installed.appendingPathComponent("Contents/marker"), encoding: .utf8), "old")
     }
 }

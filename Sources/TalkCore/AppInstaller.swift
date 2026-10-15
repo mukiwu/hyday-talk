@@ -17,8 +17,10 @@ public enum AppInstaller {
         guard let name = try FileManager.default.contentsOfDirectory(atPath: mount.path).first(where: { $0.hasSuffix(".app") }) else {
             throw TalkError("更新檔裡找不到 Hyday Talk。")
         }
-        try? FileManager.default.removeItem(at: staging)
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        // Keep a folder made by makeStagingDirectory as is, so its owner-only permissions stay.
+        if !FileManager.default.fileExists(atPath: staging.path) {
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
         let destination = staging.appendingPathComponent(name)
         let copy = try await run("/usr/bin/ditto", [mount.appendingPathComponent(name).path, destination.path])
         guard copy.status == 0 else { throw TalkError("無法複製新版，請確認磁碟空間。") }
@@ -37,12 +39,31 @@ public enum AppInstaller {
         return String(value)
     }
 
-    /// Rejects anything that is not intact, notarized and signed by `team`.
-    public static func verify(candidate: URL, team expected: String) async throws {
+    /// Rejects anything that is not a newer copy of `current`, intact, notarized and signed by `team`.
+    public static func verify(candidate: URL, current: URL, team expected: String) async throws {
         let failure = TalkError("新版的簽名驗證失敗，已停止更新。")
+        guard isSameAppAndNewer(candidate, than: current) else { throw TalkError("下載的檔案不是較新的 Hyday Talk，已停止更新。") }
         guard try await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", candidate.path]).status == 0,
               await team(of: candidate) == expected,
               try await run("/usr/sbin/spctl", ["--assess", "--type", "execute", candidate.path]).status == 0 else { throw failure }
+    }
+
+    /// Same bundle identifier and a higher version, so another app or a downgrade is never installed.
+    public static func isSameAppAndNewer(_ candidate: URL, than current: URL) -> Bool {
+        func info(_ app: URL) -> (id: String, version: String)? {
+            guard let plist = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
+                  let id = plist["CFBundleIdentifier"] as? String, let version = plist["CFBundleShortVersionString"] as? String else { return nil }
+            return (id, version)
+        }
+        guard let new = info(candidate), let old = info(current) else { return false }
+        return new.id == old.id && AppUpdate.isNewer(new.version, than: old.version)
+    }
+
+    /// A fresh folder only this user can read, so nothing else can stage files for the swap.
+    public static func makeStagingDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hyday-update-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        return directory
     }
 
     /// Replacing needs write access to the folder holding the app and to the app itself.
@@ -51,19 +72,25 @@ public enum AppInstaller {
         return manager.isWritableFile(atPath: installed.deletingLastPathComponent().path) && manager.isWritableFile(atPath: installed.path)
     }
 
-    /// Starts a detached script that waits for `pid` to exit, swaps `staged` into `installed`
-    /// (restoring the old copy if the copy fails) and opens the result with `launcher`.
-    public static func replaceAfterExit(pid: Int32, staged: URL, installed: URL, launcher: String = "/usr/bin/open") throws {
+    /// Starts a detached script that waits for `pid` to exit, swaps `staged` into `installed` and opens
+    /// the result with `launcher`. The copy that lands in place is checked again against `team`, since
+    /// the staged files could change after `verify`; on any failure the old copy is restored.
+    /// `team` is nil only in tests, where the fixtures are unsigned.
+    public static func replaceAfterExit(pid: Int32, staged: URL, installed: URL, team: String?,
+                                        launcher: String = "/usr/bin/open") throws {
+        let check = team == nil ? "true"
+            : #"codesign --verify --deep --strict -R="anchor apple generic and certificate leaf[subject.OU] = "$5"" "$3""#
         let script = """
         while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
         backup="$3.previous-$$"
         mv "$3" "$backup" || { "$4" "$3"; exit 1; }
-        if ditto "$2" "$3"; then rm -rf "$backup" "$2"; else rm -rf "$3"; mv "$backup" "$3"; fi
+        if ditto "$2" "$3" && \(check); then rm -rf "$backup"; else rm -rf "$3"; mv "$backup" "$3"; fi
+        rm -rf "$(dirname "$2")"
         "$4" "$3"
         """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script, "hyday-update", String(pid), staged.path, installed.path, launcher]
+        process.arguments = ["-c", script, "hyday-update", String(pid), staged.path, installed.path, launcher, team ?? ""]
         process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
         try process.run()
     }

@@ -95,10 +95,10 @@ final class AppUpdater: ObservableObject {
             do {
                 let current = Bundle.main.bundleURL
                 guard let team = await AppInstaller.team(of: current) else { throw TalkError("目前的版本沒有簽名，請改用安裝檔更新。") }
-                let staging = FileManager.default.temporaryDirectory.appendingPathComponent("Hyday Talk Update", isDirectory: true)
-                let staged = try await AppInstaller.extractApp(from: file, into: staging)
-                try await AppInstaller.verify(candidate: staged, team: team)
-                try AppInstaller.replaceAfterExit(pid: ProcessInfo.processInfo.processIdentifier, staged: staged, installed: current)
+                let staged = try await AppInstaller.extractApp(from: file, into: try AppInstaller.makeStagingDirectory())
+                try await AppInstaller.verify(candidate: staged, current: current, team: team)
+                try AppInstaller.replaceAfterExit(pid: ProcessInfo.processInfo.processIdentifier, staged: staged,
+                                                  installed: current, team: team)
                 NSApp.terminate(nil)
             } catch {
                 state = .failed((error as? TalkError)?.message ?? "無法自動更新，請改用安裝檔。")
