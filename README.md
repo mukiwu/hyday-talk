@@ -70,12 +70,12 @@ Hyday Talk 為原生 macOS App，語音辨識可在本機完成，錄音不需�
 
 | 用途 | 推薦模型 | 取得方式 |
 | --- | --- | --- |
-| 語音辨識 | Qwen3-ASR 0.6B | 在語音辨識頁選擇本機模型後下載 |
+| 語音辨識 | TEA-ASR 1.1 或 Qwen3-ASR 0.6B | 在語音辨識頁選擇本機模型後下載 |
 | 文字整理 | qwen3.5:9b | 先安裝 [Ollama](https://ollama.com/download)，再於文字整理頁按安裝模型 |
 
-這個組合對中文口語與中英夾雜較準確，全部在本機執行，也可以在 App 內改用其他模型
+這個組合對中文口語與中英夾雜較準確，全部在本機執行，也可以在 App 內改用其他模型；TEA-ASR 1.1 針對台灣口語調校，直接輸出繁體與台灣用詞，檔案約 1.69 GB，Qwen3-ASR 0.6B 較小也較快
 
-本機辨識引擎 whisper.cpp 與 transcribe.cpp 已內建於 App，不需另行安裝；Qwen3-ASR 模型採 Apache 2.0 授權，個人辭典與 Hyday 詞彙會作為辨識詞彙提示
+本機辨識引擎 whisper.cpp 與 transcribe.cpp 已內建於 App，不需另行安裝；Qwen3-ASR 模型採 Apache 2.0 授權，TEA-ASR 1.1 採 MIT 授權，App 下載的是轉換給 transcribe.cpp 使用的 [GGUF 版本](https://huggingface.co/mukiwu/TEA-ASR-1.1-transcribe-gguf)，個人辭典與 Hyday 詞彙會作為辨識詞彙提示
 
 API 來源需支援 `POST /audio/transcriptions` 並回傳含 `text` 欄位的 JSON，遠端服務僅接受 HTTPS；本機服務可使用 HTTP 並免填 API Key
 
@@ -129,6 +129,7 @@ Hyday Talk 會讀取筆記中的 `@(名稱)` 與 `#標籤`，作為語音辨識�
 | --- | --- |
 | 基礎整理 | 轉換字形、將既有標點轉為全形並套用個人辭典，不補上新標點 |
 | 本機 AI | 透過本機 Ollama 模型整理文字，逐字稿不會上傳 |
+| Claude | 透過這台 Mac 上已登入的 Claude Code 整理文字，可選 Haiku、Sonnet 或 Opus，使用自己的 Claude 訂閱額度 |
 | API | 透過 OpenAI 相容的 `POST /chat/completions` 服務整理文字 |
 
 聽寫風格分為保留原話、自然與正式，預設為自然；保留原話會略過 AI 整理，僅套用字形、既有標點與個人辭典；自然只刪掉沒有意思的贅詞，保留使用者的用詞與帶情緒的語氣；正式會刪除所有贅詞並改成書面用語
@@ -170,6 +171,7 @@ Hyday Talk 會讀取筆記中的 `@(名稱)` 與 `#標籤`，作為語音辨識�
 - 插入文字時透過剪貼簿送出貼上指令，並於 0.8 秒後還原原本的剪貼簿內容
 - App 不讀取整份文件、瀏覽器頁面或剪貼簿歷史，並拒絕在密碼欄位開始錄音
 - 使用 API 時，音訊、逐字稿、辭典與選取文字會依功能傳送至使用者指定的服務
+- 使用 Claude 時，逐字稿會送至 Anthropic 處理；開始錄音時會先在背景啟動 Claude Code，講完約 1 秒內整理完成；Hyday Talk 不經手登入資料
 
 ## 參考資料
 
@@ -178,6 +180,8 @@ Hyday Talk 會讀取筆記中的 `@(名稱)` 與 `#標籤`，作為語音辨識�
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
 - [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)
 - [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)
+- [TEA-ASR 1.1](https://huggingface.co/JacobLinCool/TEA-ASR-1.1)
+- [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
 
 ## 贊助
 
