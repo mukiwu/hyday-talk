@@ -29,9 +29,8 @@ enum TextInsertion {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             MainActor.assumeIsolated { remember(app) }
         }
-        // Some apps stop reporting their focused element when our controls are
-        // clicked. Retain only its AX reference while that app is foreground;
-        // selected text is read only when a recording starts.
+        // Remember the foreground app's field (see FocusMemory). Retain only its AX
+        // reference; selected text is read only when a recording starts.
         let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
             MainActor.assumeIsolated {
                 if let app = NSWorkspace.shared.frontmostApplication { remember(app) }
@@ -50,9 +49,10 @@ enum TextInsertion {
 
     private static func remember(_ app: NSRunningApplication) {
         if app.processIdentifier != ProcessInfo.processInfo.processIdentifier && !app.isTerminated {
-            if previousExternalApplication?.processIdentifier != app.processIdentifier { previousExternalElement = nil }
+            previousExternalElement = FocusMemory.remembered(previous: previousExternalElement,
+                previousPID: previousExternalApplication?.processIdentifier,
+                reported: focusedElement(pid: app.processIdentifier), pid: app.processIdentifier)
             previousExternalApplication = app
-            previousExternalElement = focusedElement(pid: app.processIdentifier)
         }
     }
 
@@ -64,7 +64,7 @@ enum TextInsertion {
             recorderPID: ProcessInfo.processInfo.processIdentifier, previousExternalPID: previousPID),
               let app = NSRunningApplication(processIdentifier: pid) else { return nil }
         let cachedElement = previousExternalApplication?.processIdentifier == pid ? previousExternalElement : nil
-        let element = focusedElement(pid: app.processIdentifier) ?? cachedElement
+        let element = field(pid: app.processIdentifier, remembered: cachedElement)
         let role = element.flatMap { attribute($0, kAXRoleAttribute) as? String } ?? ""
         let subrole = element.flatMap { attribute($0, kAXSubroleAttribute) as? String } ?? ""
         var settable = DarwinBoolean(false)
@@ -114,20 +114,14 @@ enum TextInsertion {
             }
         }
         try Task.checkCancellation()
-        // Electron apps such as HyperFrames can report no focused element for
-        // seconds while the caret is still in the field; then ask the field itself.
-        var current = focusedElement(pid: target.pid)
-        if current == nil, attribute(element, kAXFocusedAttribute) as? Bool == true { current = element }
+        let current = field(pid: target.pid, remembered: element)
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.pid,
               let current, CFEqual(element, current) else {
             throw TalkError("你已切換輸入位置，文字已保留供複製。")
         }
-        if let before = target.selectionRange, let after = range(current),
-           before.location != after.location || before.length != after.length {
-            throw TalkError("游標或選取範圍已改變，文字已保留供複製。")
-        }
-        if (attribute(current, kAXSelectedTextAttribute) as? String ?? "") != target.selection {
-            throw TalkError("選取文字已改變，結果已保留供複製。")
+        if let problem = InsertionCheck.problem(before: target.selectionRange, after: range(current), beforeSelection: target.selection,
+                                                afterSelection: attribute(current, kAXSelectedTextAttribute) as? String ?? "") {
+            throw TalkError(problem)
         }
         // Always use the editor's paste command. AX setters can report success
         // on a terminal's hidden textarea without sending an input/paste event.
@@ -162,6 +156,12 @@ enum TextInsertion {
     static func copy(_ text: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
     }
+    /// The field to dictate into, chosen by FocusMemory; capture and insertion both use it.
+    private static func field(pid: pid_t, remembered: AXUIElement?) -> AXUIElement? {
+        FocusMemory.field(reported: focusedElement(pid: pid), remembered: remembered,
+                          rememberedHasFocus: remembered.flatMap { attribute($0, kAXFocusedAttribute) as? Bool } == true)
+    }
+
     private static func focusedElement(pid: pid_t) -> AXUIElement? {
         var focused: CFTypeRef?
         let app = AXUIElementCreateApplication(pid)
@@ -196,7 +196,7 @@ enum TextInsertion {
 
     static func isEditing(_ element: AXUIElement, pid: pid_t) -> Bool {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-              let current = focusedElement(pid: pid) else { return false }
+              let current = field(pid: pid, remembered: element) else { return false }
         return CFEqual(element, current)
     }
 
