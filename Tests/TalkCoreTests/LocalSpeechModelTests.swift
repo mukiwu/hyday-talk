@@ -83,7 +83,7 @@ final class LocalSpeechModelTests: XCTestCase {
     }
 
     func testModelsListWhisperAndQwenWithTheirOwnSources() {
-        XCTAssertEqual(LocalSpeechModel.all.map(\.id), ["large-v3-turbo-q5_0", "qwen3-asr-0.6b-q8_0", "qwen3-asr-1.7b-q6_k"])
+        XCTAssertEqual(LocalSpeechModel.all.map(\.id), ["large-v3-turbo-q5_0", "qwen3-asr-0.6b-q8_0", "qwen3-asr-1.7b-q6_k", "tea-asr-1.1-q6_k"])
         XCTAssertEqual(LocalSpeechModel.recommended, LocalSpeechModel.qwenSmall)
         XCTAssertEqual(LocalSpeechModel.whisperTurbo.downloadURL.absoluteString,
                        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin")
@@ -95,5 +95,9 @@ final class LocalSpeechModelTests: XCTestCase {
         XCTAssertEqual(qwen.bytes, 850_423_456)
         XCTAssertEqual(LocalSpeechModel.engine(forModelPath: "/m/Qwen3-ASR-0.6B-Q8_0.gguf"), .qwen)
         XCTAssertEqual(LocalSpeechModel.engine(forModelPath: "/m/ggml-small.bin"), .whisper)
+        XCTAssertEqual(LocalSpeechModel.tea.engine, .qwen)
+        XCTAssertEqual(LocalSpeechModel.all.filter(\.isRecommended), [LocalSpeechModel.qwenSmall, LocalSpeechModel.tea])
+        XCTAssertEqual(LocalSpeechModel.tea.downloadURL.absoluteString,
+                       "https://huggingface.co/mukiwu/TEA-ASR-1.1-transcribe-gguf/resolve/main/TEA-ASR-1.1-Q6_K.gguf")
     }
 }

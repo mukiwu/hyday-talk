@@ -18,7 +18,7 @@ struct LocalModelSettingsView: View {
                 let selected = url?.path == model.settings.whisperModel
                 VStack(alignment: .leading, spacing: 0) {
                     SettingsRow(title: candidate.title, detail: "\(candidate.detail) \(candidate.sizeLabel)",
-                                badge: candidate == .recommended ? "推薦" : nil) {
+                                badge: candidate.isRecommended ? "推薦" : nil) {
                         if selected {
                             Label("使用中", systemImage: "checkmark.circle.fill")
                                 .font(Typography.font(.caption, weight: .medium)).foregroundStyle(Palette.action).fixedSize()
@@ -34,8 +34,14 @@ struct LocalModelSettingsView: View {
                     }
                     if manager.busyModelID == candidate.id {
                         HStack(spacing: 10) {
-                            ProgressView().controlSize(.small)
-                            Text(manager.status).font(Typography.font(.caption)).foregroundStyle(Palette.muted)
+                            if let progress = manager.progress {
+                                ProgressView(value: progress).frame(width: 160)
+                                Text("\(manager.status) \(Int(progress * 100))%").font(Typography.font(.caption))
+                                    .foregroundStyle(Palette.muted).monospacedDigit()
+                            } else {
+                                ProgressView().controlSize(.small)
+                                Text(manager.status).font(Typography.font(.caption)).foregroundStyle(Palette.muted)
+                            }
                             Spacer()
                             Button("取消", action: manager.cancel).buttonStyle(AlignButtonStyle())
                         }.padding(.bottom, 14)

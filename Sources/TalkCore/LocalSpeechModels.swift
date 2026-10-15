@@ -32,9 +32,17 @@ public struct LocalSpeechModel: Identifiable, Equatable, Sendable {
         detail: "辨識最準確，需要較多儲存空間與記憶體。", filename: "Qwen3-ASR-1.7B-Q6_K.gguf", bytes: 1_692_554_208,
         sha256: "c75a961b7134a6c952d89797865cb0d0376876185aee04ef6d12c31c2952e4e1",
         repository: "handy-computer/Qwen3-ASR-1.7B-gguf")
-    /// Marked as recommended in the model list and selected first when installed.
+    /// Qwen3-ASR 1.7B fine-tuned for Taiwan Mandarin; converted from JacobLinCool/TEA-ASR-1.1 (MIT)
+    /// with transcribe.cpp's Qwen3-ASR converter and quantized to Q6_K.
+    public static let tea = LocalSpeechModel(id: "tea-asr-1.1-q6_k", title: "TEA-ASR 1.1",
+        detail: "針對台灣口語調校，直接輸出繁體與台灣用詞，中英夾雜也準。", filename: "TEA-ASR-1.1-Q6_K.gguf", bytes: 1_692_286_464,
+        sha256: "2417fa52d49f852bfc11704190e10ddb681c343a661a3a3d1bb213876c780b68",
+        repository: "mukiwu/TEA-ASR-1.1-transcribe-gguf")
+    /// Selected first when installed.
     public static let recommended = qwenSmall
-    public static let all: [LocalSpeechModel] = [whisperTurbo, qwenSmall, qwenLarge]
+    /// Marked as recommended in the model list.
+    public var isRecommended: Bool { self == .qwenSmall || self == .tea }
+    public static let all: [LocalSpeechModel] = [whisperTurbo, qwenSmall, qwenLarge, tea]
 
     public init(id: String, title: String, detail: String, filename: String, bytes: Int64, sha256: String,
                 repository: String = "ggerganov/whisper.cpp") {

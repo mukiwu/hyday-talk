@@ -124,7 +124,8 @@ struct MainView: View {
                 ForEach([Page.hyday, .speech, .text, .dictionary, .settings]) { item in navigationItem(item) }
             }
             Spacer(minLength: 24)
-            SidebarJobs(installer: model.textModelInstaller, updater: model.updater, openText: { page = .text })
+            SidebarJobs(installer: model.textModelInstaller, speechModels: model.localModels, updater: model.updater,
+                        openText: { page = .text }, openSpeech: { page = .speech })
                 .padding(.bottom, -10)
             VStack(spacing: 0) {
                 Button { model.openPermissionGuide() } label: {
@@ -366,6 +367,7 @@ struct HomeView: View {
         switch model.settings.textBackend {
         case .local: return model.settings.localTextModel ?? "未選擇模型"
         case .api: return apiTitle(model.settings.textAPI.model)
+        case .claude: return "Claude \(model.settings.claudeModel.title)"
         default: return model.settings.textBackend.title
         }
     }
@@ -597,8 +599,10 @@ extension View {
 /// download and app updates. Shows nothing when there is nothing to report.
 private struct SidebarJobs: View {
     @ObservedObject var installer: TextModelInstaller
+    @ObservedObject var speechModels: LocalSpeechModelManager
     @ObservedObject var updater: AppUpdater
     let openText: () -> Void
+    let openSpeech: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -608,6 +612,14 @@ private struct SidebarJobs: View {
                         ProgressView(value: installer.progress ?? 0)
                     }
                 }.buttonStyle(.plain).pointingCursor().help("開啟文字整理設定")
+            }
+            if let downloading = speechModels.downloading {
+                Button(action: openSpeech) {
+                    job(symbol: "arrow.down.circle", title: "下載 \(downloading.title)",
+                        detail: speechModels.progress.map { "\(speechModels.status) \(Int($0 * 100))%" } ?? speechModels.status) {
+                        if let progress = speechModels.progress { ProgressView(value: progress) } else { ProgressView().progressViewStyle(.linear) }
+                    }
+                }.buttonStyle(.plain).pointingCursor().help("開啟語音辨識設定")
             }
             if let update = updater.update { updateJob(update) }
         }
