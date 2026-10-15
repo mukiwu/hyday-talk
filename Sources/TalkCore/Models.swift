@@ -31,8 +31,8 @@ public enum SpeechBackend: String, Codable, CaseIterable, Identifiable, Sendable
 }
 
 public enum TextBackend: String, Codable, CaseIterable, Identifiable, Sendable {
-    case basic, local, cli, api
-    public static let availableSources: [TextBackend] = [.basic, .local, .api]
+    case basic, local, cli, api, claude
+    public static let availableSources: [TextBackend] = [.basic, .local, .claude, .api]
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -40,6 +40,7 @@ public enum TextBackend: String, Codable, CaseIterable, Identifiable, Sendable {
         case .local: return "本機 AI"
         case .cli: return "CLI"
         case .api: return "API Key"
+        case .claude: return "Claude"
         }
     }
 }
@@ -197,6 +198,7 @@ public struct TalkSettings: Codable, Equatable, Sendable {
     var learnFromCorrections: Bool?
     var blockedCorrections: [DictionaryEntry]?
     var typingSpeed: Int?
+    var claudeTextModel: String?
     /// A folder chosen in the Hyday page; nil follows Hyday's own `vault.root`.
     public var hydayFolder: String?
     var askHydayNotes: Bool?
@@ -211,6 +213,11 @@ public struct TalkSettings: Codable, Equatable, Sendable {
     public var typingWordsPerMinute: Int {
         get { typingSpeed ?? 40 }
         set { typingSpeed = newValue }
+    }
+    /// Formats text through the user's own Claude Code login; Haiku unless chosen otherwise.
+    public var claudeModel: ClaudeTextModel {
+        get { claudeTextModel.flatMap(ClaudeTextModel.init(rawValue:)) ?? .recommended }
+        set { claudeTextModel = newValue.rawValue }
     }
     public var learnsFromCorrections: Bool {
         get { learnFromCorrections ?? true }

@@ -62,9 +62,9 @@ public struct ScreenContext: Equatable, Sendable {
 }
 
 public extension TalkSettings {
-    /// Local text AI keeps screen text on this Mac, so it is on by default; an API sends it out, so it is off.
+    /// Local text AI keeps screen text on this Mac, so it is on by default; an API or Claude sends it out, so it is off.
     var readsScreenContext: Bool {
-        get { readScreenContext ?? (textBackend != .api) }
+        get { readScreenContext ?? (textBackend != .api && textBackend != .claude) }
         set { readScreenContext = newValue }
     }
 

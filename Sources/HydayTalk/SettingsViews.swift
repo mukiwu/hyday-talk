@@ -153,13 +153,15 @@ struct TextSettingsView: View {
                 SettingsRow(title: "整理方式", detail: model.settings.textBackend == .basic
                             ? "保留辨識原文、轉換字形與既有標點並套用辭典，如需補上標點或整理列表，請選擇本機 AI 或 API Key。" : nil) {
                     AlignSegmentedPicker(title: "文字整理來源", values: TextBackend.availableSources,
-                                         selection: $model.settings.textBackend, label: { $0.title }).frame(width: 300)
+                                         selection: $model.settings.textBackend, label: { $0.title }).frame(width: 380)
                 }
             }
             switch model.settings.textBackend {
             case .basic: EmptyView()
             case .local, .cli:
                 LocalTextSettingsView(model: model, installer: model.textModelInstaller)
+            case .claude:
+                ClaudeTextSettingsView(model: model)
             case .api:
                 SettingsGroup(title: "文字 AI API", detail: "逐字稿、個人辭典與提問時選取的文字會送至這個服務。支援 /chat/completions，也可連接本機模型服務。") {
                     SettingsBlock { APISettingsFields(settings: $model.settings.textAPI, account: "text", model: model) }
@@ -179,8 +181,8 @@ struct TextSettingsView: View {
             }
             if model.settings.textBackend != .basic {
                 SettingsGroup(title: "畫面上下文", detail: "開始錄音時讀取游標所在的 App、視窗標題與前後的文字，讓文字 AI 參考人名、術語與語氣，不會插入或保存這些文字。密碼欄位與保留原話不會讀取。") {
-                    SettingsRow(title: "參考畫面上下文", detail: model.settings.textBackend == .api
-                                ? "開啟後，畫面上的文字會與逐字稿一起送至文字 AI API 的服務商。"
+                    SettingsRow(title: "參考畫面上下文", detail: model.settings.textBackend == .api || model.settings.textBackend == .claude
+                                ? "開啟後，畫面上的文字會與逐字稿一起送至文字 AI 的服務商。"
                                 : "文字只交給這台 Mac 上的文字 AI，不會離開電腦。") {
                         Toggle("參考畫面上下文", isOn: $model.settings.readsScreenContext).labelsHidden()
                     }

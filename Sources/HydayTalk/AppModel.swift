@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
     private let store = LocalStore()
     let localModels = LocalSpeechModelManager()
     let textModelInstaller = TextModelInstaller()
+    private var claudeSession: ClaudeSession?
     let updater = AppUpdater()
     private let audio = AudioCapture()
     private let shortcuts = GlobalShortcuts()
@@ -259,6 +260,10 @@ final class AppModel: ObservableObject {
         let snapshot = settings
         do { try validate(snapshot, action: action) }
         catch { fail(error); return }
+        // Start Claude Code while the user is still speaking, so formatting skips the CLI start-up.
+        if snapshot.textBackend == .claude, snapshot.requiresTextModel(for: action), let session = claude() {
+            Task { await session.prepare(model: snapshot.claudeModel.rawValue) }
+        }
         let focused = TextInsertion.capture()
         target = action == .hyday ? nil : focused
         if target?.secure == true { fail(TalkError("這是密碼欄位。請改在一般文字輸入框使用。")); return }
@@ -462,6 +467,18 @@ final class AppModel: ObservableObject {
             guard FileManager.default.isExecutableFile(atPath: (settings.textCLIExecutable as NSString).expandingTildeInPath) else { throw TalkError("請先選擇文字 CLI 的可執行檔。") }
             _ = try CLIArguments.parse(settings.textCLIArguments)
         } else if settings.textBackend == .api { try validateAPI(settings.textAPI, account: "text") }
+        else if settings.textBackend == .claude, claude() == nil {
+            throw TalkError("找不到 Claude Code，請先安裝並登入 Claude Code，或改用其他整理方式。")
+        }
+    }
+
+    /// One long-running Claude Code process, created once the `claude` command is installed.
+    private func claude() -> ClaudeSession? {
+        if let claudeSession { return claudeSession }
+        guard let executable = ClaudeSession.discoverExecutable() else { return nil }
+        claudeSession = ClaudeSession(executable: executable,
+                                      workingDirectory: store.directory.appendingPathComponent("Claude", isDirectory: true))
+        return claudeSession
     }
     private func validateAPI(_ api: APISettings, account: String) throws {
         let endpoint = try APIClient.endpoint(base: api.baseURL, path: "")
@@ -578,6 +595,9 @@ final class AppModel: ObservableObject {
         case .basic: throw TalkError("基礎整理沒有文字 AI。")
         case .local: return try await LocalTextClient.complete(prompt: prompt, model: settings.localTextModel ?? "")
         case .api: return try await APIClient.complete(prompt: prompt, settings: settings.textAPI, key: KeyStore.read("text"))
+        case .claude:
+            guard let session = claude() else { throw TalkError("找不到 Claude Code，請先安裝並登入 Claude Code。") }
+            return try await session.complete(prompt: prompt, model: settings.claudeModel.rawValue)
         case .cli:
             let arguments = CLIArguments.expand(try CLIArguments.parse(settings.textCLIArguments), values: ["{prompt}": prompt])
             let output = try await ProcessRunner.run(executable: settings.textCLIExecutable, arguments: arguments, input: prompt, timeout: 120)

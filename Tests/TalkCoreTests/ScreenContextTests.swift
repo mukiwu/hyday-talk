@@ -24,6 +24,8 @@ final class ScreenContextTests: XCTestCase {
         XCTAssertTrue(settings.readsScreenContext)
         settings.textBackend = .api
         XCTAssertFalse(settings.readsScreenContext)
+        settings.textBackend = .claude
+        XCTAssertFalse(settings.readsScreenContext)
         settings.readsScreenContext = true
         XCTAssertTrue(settings.readsScreenContext)
     }
