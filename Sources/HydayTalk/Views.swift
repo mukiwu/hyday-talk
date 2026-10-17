@@ -106,6 +106,13 @@ struct MainView: View {
                 Text(item.rawValue).font(Typography.font(.body, weight: page == item ? .medium : .regular))
                     .foregroundStyle(page == item ? Palette.ink : Palette.ink.opacity(0.85))
                 Spacer(minLength: 0)
+                if item == .history, model.failedCount > 0 {
+                    Text("\(model.failedCount)").font(Typography.font(.caption, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(.white).padding(.horizontal, 7).padding(.vertical, 1)
+                        .background(Palette.danger, in: Capsule())
+                        .help("\(model.failedCount) 筆聽寫處理失敗，可重新處理")
+                        .accessibilityLabel("\(model.failedCount) 筆處理失敗")
+                }
             }.frame(minHeight: 20)
         }.buttonStyle(AlignNavigationStyle(selected: page == item, horizontalPadding: 12, verticalPadding: 9))
             .accessibilityAddTraits(page == item ? [.isSelected] : [])
@@ -442,6 +449,7 @@ struct HistoryView: View {
     @State private var filter: VoiceAction? = nil
     @State private var confirmClear = false
     @State private var hovered: UUID?
+    @State private var player: NSSound?
     private var records: [DictationRecord] {
         model.history.filter { record in
             (filter == nil || record.action == filter)
@@ -519,6 +527,12 @@ struct HistoryView: View {
         } message: { Text("這項操作無法復原。") }
     }
 
+    private func play(_ record: DictationRecord) {
+        player?.stop()
+        player = NSSound(contentsOf: model.recordings.url(for: record.id), byReference: true)
+        player?.play()
+    }
+
     private func row(_ record: DictationRecord) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Text(record.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute())
@@ -526,9 +540,31 @@ struct HistoryView: View {
             if record.action != .dictate {
                 Text(filterTitle(record.action)).font(Typography.font(.caption, weight: .medium)).foregroundStyle(tint(record.action)).fixedSize()
             }
-            Text(record.text).font(Typography.font(.body)).lineSpacing(3).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 6) {
+                if !record.text.isEmpty {
+                    Text(record.text).font(Typography.font(.body)).lineSpacing(3).textSelection(.enabled)
+                }
+                if let failure = record.failure {
+                    Label("處理失敗：\(failure)", systemImage: "exclamationmark.triangle")
+                        .font(Typography.font(.caption)).foregroundStyle(Palette.danger)
+                    if model.hasRecording(record) {
+                        Button(model.retrying.contains(record.id) ? "正在重新處理…" : "重新處理") { model.retry(record) }
+                            .buttonStyle(AlignButtonStyle()).disabled(model.retrying.contains(record.id))
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 2) {
+                if model.hasRecording(record) {
+                    Button { play(record) } label: {
+                        Image(systemName: "play.circle").frame(width: 18, height: 18)
+                    }.buttonStyle(AlignButtonStyle(kind: .ghost)).help("播放錄音").accessibilityLabel("播放錄音")
+                    if record.failure == nil {
+                        Button { model.retry(record) } label: {
+                            Image(systemName: "arrow.clockwise").frame(width: 18, height: 18)
+                        }.buttonStyle(AlignButtonStyle(kind: .ghost)).disabled(model.retrying.contains(record.id))
+                            .help("用目前的設定重新處理").accessibilityLabel("用目前的設定重新處理")
+                    }
+                }
                 Button { TextInsertion.copy(record.text); model.notice = "已複製文字。" } label: {
                     Image(systemName: "doc.on.doc").frame(width: 18, height: 18)
                 }.buttonStyle(AlignButtonStyle(kind: .ghost)).help("複製文字").accessibilityLabel("複製文字")

@@ -355,7 +355,7 @@ struct GeneralSettingsView: View {
                     }.buttonStyle(AlignButtonStyle())
                 }
             }
-            SettingsGroup(title: "輸入與紀錄", detail: "本機模型與 API 使用的暫存音訊會在完成或取消後刪除，系統辨識不寫入音訊檔，API Key 儲存在 macOS 鑰匙圈。") {
+            SettingsGroup(title: "輸入與紀錄", detail: "錄音依下方的保留期限存在這台 Mac，取消的錄音會立即刪除，API Key 儲存在 macOS 鑰匙圈。") {
                 SettingsRow(title: "聽寫與翻譯完成後，自動插入原本的文字框",
                             detail: model.settings.autoInsert ? "未偵測到輸入框或輸入位置已變更時，自動複製文字。" : nil) {
                     Toggle("聽寫與翻譯完成後，自動插入原本的文字框", isOn: $model.settings.autoInsert).labelsHidden()
@@ -367,6 +367,7 @@ struct GeneralSettingsView: View {
                 SettingsRow(title: "在這台 Mac 保留文字紀錄") {
                     Toggle("在這台 Mac 保留文字紀錄", isOn: $model.settings.saveHistory).labelsHidden()
                 }
+                RecordingRetentionRow(model: model)
                 SettingsRow(title: "播放開始與完成提示音") {
                     Toggle("播放開始與完成提示音", isOn: $model.settings.interactionSounds).labelsHidden()
                 }
@@ -487,6 +488,65 @@ struct SectionTitle: View {
                 .foregroundStyle(tint).frame(width: 20)
                 .accessibilityHidden(true)
             Text(title).font(Typography.font(.section, weight: .medium)).foregroundStyle(Palette.ink).singleLineHeading()
+        }
+    }
+}
+
+/// Picks how long recordings stay, with a custom number of days and a size readout.
+private struct RecordingRetentionRow: View {
+    @ObservedObject var model: AppModel
+    private enum Choice: Hashable { case off, failedOnly, days(Int), custom, forever }
+    private static let presets = [1, 3, 7, 30]
+    /// Stays on once chosen, so stepping onto 7 days does not hide the stepper.
+    @State private var custom = false
+    private var choice: Binding<Choice> {
+        Binding {
+            if custom { return .custom }
+            switch model.settings.recordingRetention {
+            case .off: return .off
+            case .failedOnly: return .failedOnly
+            case .forever: return .forever
+            case .days(let days): return Self.presets.contains(days) ? .days(days) : .custom
+            }
+        } set: { choice in
+            custom = choice == .custom
+            switch choice {
+            case .off: model.settings.recordingRetention = .off
+            case .failedOnly: model.settings.recordingRetention = .failedOnly
+            case .forever: model.settings.recordingRetention = .forever
+            case .days(let days): model.settings.recordingRetention = .days(days)
+            case .custom: model.settings.recordingRetention = .days(14)
+            }
+            model.pruneRecordings()
+        }
+    }
+    private var customDays: Binding<Int> {
+        Binding {
+            if case .days(let days) = model.settings.recordingRetention { return days }
+            return 14
+        } set: { model.settings.recordingRetention = .days($0); model.pruneRecordings() }
+    }
+    private var isCustom: Bool { choice.wrappedValue == .custom }
+
+    var body: some View {
+        SettingsRow(title: "錄音保留期限",
+                    detail: "辨識失敗時，可到聽寫紀錄用保留的錄音重新處理，不用再講一次。失敗的錄音會一直保留，直到重新處理成功或手動刪除。目前佔用 \(ByteCountFormatter.string(fromByteCount: model.recordingBytes, countStyle: .file))。") {
+            HStack(spacing: 8) {
+                Picker("錄音保留期限", selection: choice) {
+                    Text("不保留").tag(Choice.off)
+                    Text("只保留失敗的").tag(Choice.failedOnly)
+                    ForEach(Self.presets, id: \.self) { Text("\($0) 天").tag(Choice.days($0)) }
+                    Text("自訂天數").tag(Choice.custom)
+                    Text("永久").tag(Choice.forever)
+                }.labelsHidden().fixedSize()
+                if isCustom {
+                    Stepper(value: customDays, in: 1...365) { Text("\(customDays.wrappedValue) 天").monospacedDigit() }.fixedSize()
+                }
+                Button("刪除所有錄音", role: .destructive) { model.removeAllRecordings() }
+                    .buttonStyle(AlignButtonStyle(kind: .destructive)).disabled(model.recordingBytes == 0)
+            }
+        }.onAppear {
+            if case .days(let days) = model.settings.recordingRetention { custom = !Self.presets.contains(days) }
         }
     }
 }

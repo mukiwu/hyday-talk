@@ -204,6 +204,11 @@ public struct TalkSettings: Codable, Equatable, Sendable {
     var askHydayNotes: Bool?
     var readScreenContext: Bool?
     var screenContextExcluded: [String]?
+    var keepRecordings: RecordingRetention?
+    public var recordingRetention: RecordingRetention {
+        get { keepRecordings ?? .recommended }
+        set { keepRecordings = newValue }
+    }
     /// Text questions answer from notes found in the Hyday folder; off by default.
     public var asksHydayNotes: Bool {
         get { askHydayNotes ?? false }
@@ -241,10 +246,12 @@ public struct DictationRecord: Codable, Identifiable, Equatable, Sendable {
     public var backend: SpeechBackend
     public var duration: TimeInterval
     public var destination: String
-    public init(date: Date = Date(), rawText: String, text: String, action: VoiceAction,
-                backend: SpeechBackend, duration: TimeInterval, destination: String) {
-        self.date = date; self.rawText = rawText; self.text = text; self.action = action
-        self.backend = backend; self.duration = duration; self.destination = destination
+    /// Why this dictation could not be transcribed; its recording is kept for a retry.
+    public var failure: String?
+    public init(id: UUID = UUID(), date: Date = Date(), rawText: String, text: String, action: VoiceAction,
+                backend: SpeechBackend, duration: TimeInterval, destination: String, failure: String? = nil) {
+        self.id = id; self.date = date; self.rawText = rawText; self.text = text; self.action = action
+        self.backend = backend; self.duration = duration; self.destination = destination; self.failure = failure
     }
 }
 

@@ -52,6 +52,7 @@ final class AppModel: ObservableObject {
     var showWindow: (() -> Void)?
     var onPanelChange: (() -> Void)?
     private let store = LocalStore()
+    private var pruneTimer: Timer?
     let localModels = LocalSpeechModelManager()
     let textModelInstaller = TextModelInstaller()
     private var claudeSession: ClaudeSession?
@@ -123,6 +124,10 @@ final class AppModel: ObservableObject {
             self?.settings.whisperModel = url.path
         }
         TextInsertion.startTracking()
+        pruneRecordings()
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pruneRecordings() }
+        }
         refreshPermissions()
         reloadHydayVocabulary()
         permissionsTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -273,7 +278,7 @@ final class AppModel: ObservableObject {
         sessionSettings = snapshot; self.action = action
         sessionHints = RecognitionHints.terms(dictionary: snapshot.dictionary, vocabulary: hydayVocabulary)
         let hints = sessionHints
-        result = ""; transcript = ""; notice = ""; missedInsertion = false; elapsed = 0; level = 0
+        result = ""; transcript = ""; notice = ""; missedInsertion = false; elapsed = 0; level = 0; failedRecordID = nil
         destination = action == .hyday ? "Hyday"
             : (snapshot.autoInsert && action != .ask && (target?.editable != true || target?.element == nil)
                ? "剪貼簿" : (target?.name ?? "結果區"))
@@ -323,28 +328,28 @@ final class AppModel: ObservableObject {
         let voiceAction = action; let inputTarget = target; let hints = sessionHints; let context = sessionContext
         phase = .transcribing; onPanelChange?()
         if snapshot.interactionSounds { NSSound(named: "Pop")?.play() }
+        let recordID = UUID(); let recordings = recordings
         operation = Task {
             defer { if sessionID == current { audio.cancel() } }
+            // Saved before transcribing, so a failure can be retried from the history page.
+            var saved: URL?
+            if snapshot.recordingRetention != .off, let file = try? await audio.audioFile(),
+               (try? recordings.save(file, as: recordID)) != nil { saved = recordings.url(for: recordID) }
+            var heard = ""
             do {
                 var raw: String
                 if snapshot.speechBackend == .system {
                     raw = try SpeechTranscription.validatedText(await audio.systemTranscript())
                     if audio.usedPartialTranscript { notice = "系統未回傳完整結果，這次保留最後的辨識文字。" }
+                    if RecognitionHints.isEcho(raw, hints: hints) { throw TalkError("沒有辨識到文字，請再試一次。") }
+                } else {
+                    let file: URL
+                    if let saved { file = saved } else { file = try await audio.audioFile() }
+                    raw = try await transcribeRecording(file, settings: snapshot, hints: hints)
                 }
-                else {
-                    let file = try await audio.audioFile()
-                    let key = snapshot.speechBackend == .api ? KeyStore.read("speech") : ""
-                    raw = try await SpeechTranscription.transcribe(file: file, settings: snapshot, key: key, hints: hints)
-                    if RecognitionHints.isEcho(raw, hints: hints) {
-                        // The model recited the hint list instead of the speech; listen again without it.
-                        try Task.checkCancellation()
-                        raw = try await SpeechTranscription.transcribe(file: file, settings: snapshot, key: key, hints: [])
-                    }
-                }
-                if RecognitionHints.isEcho(raw, hints: hints) { throw TalkError("沒有辨識到文字，請再試一次。") }
                 try Task.checkCancellation(); guard sessionID == current else { return }
                 guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw TalkError("沒有辨識到文字，請再試一次。") }
-                transcript = raw
+                transcript = raw; heard = raw
                 let cleaned = TextProcessing.clean(raw, settings: snapshot)
                 var output = cleaned
                 var aiFormatted = false
@@ -405,10 +410,12 @@ final class AppModel: ObservableObject {
                 usage.record(words: TextProcessing.wordCount(output), seconds: duration,
                              app: place, action: voiceAction); saveUsage()
                 if snapshot.saveHistory {
-                    history.insert(DictationRecord(rawText: raw, text: voiceAction == .hyday ? result : output, action: voiceAction, backend: snapshot.speechBackend,
+                    history.insert(DictationRecord(id: recordID, rawText: raw, text: voiceAction == .hyday ? result : output, action: voiceAction, backend: snapshot.speechBackend,
                         duration: duration, destination: place), at: 0)
                     history = Array(history.prefix(200)); saveHistory()
                 }
+                if saved != nil, !snapshot.recordingRetention.keeps(failed: false, savesHistory: snapshot.saveHistory) { recordings.remove(recordID) }
+                pruneRecordings()
                 // Insertion or clipboard fallback finishes before hiding; the result remains available.
                 phase = delivered ? .idle : .done; onPanelChange?()
                 if voiceAction == .hyday {
@@ -416,8 +423,109 @@ final class AppModel: ObservableObject {
                     try? await Task.sleep(for: .seconds(2))
                     if sessionID == current, phase == .done { phase = .idle; onPanelChange?() }
                 }
-            } catch is CancellationError { }
-            catch { if sessionID == current { fail(error) } }
+            } catch is CancellationError { if saved != nil { recordings.remove(recordID) } }
+            catch {
+                guard sessionID == current else { return }
+                if saved != nil {
+                    // Kept with the error, so the history page can run it again without speaking twice.
+                    history.insert(DictationRecord(id: recordID, rawText: heard, text: heard, action: voiceAction, backend: snapshot.speechBackend,
+                        duration: duration, destination: voiceAction == .hyday ? "Hyday" : (inputTarget?.name ?? "結果區"),
+                        failure: error.localizedDescription), at: 0)
+                    history = Array(history.prefix(200)); saveHistory(); pruneRecordings()
+                    fail(TalkError(error.localizedDescription + " 錄音已保留，可以重新處理。"))
+                    failedRecordID = recordID
+                } else { fail(error) }
+            }
+        }
+    }
+
+    /// Transcribes a recorded file, listening again without hints if the model recited them.
+    private func transcribeRecording(_ file: URL, settings: TalkSettings, hints: [String]) async throws -> String {
+        if settings.speechBackend == .system {
+            let raw = try SpeechTranscription.validatedText(await AudioCapture.systemTranscript(of: file, settings: settings, hints: hints))
+            if RecognitionHints.isEcho(raw, hints: hints) { throw TalkError("沒有辨識到文字，請再試一次。") }
+            return raw
+        }
+        let key = settings.speechBackend == .api ? KeyStore.read("speech") : ""
+        var raw = try await SpeechTranscription.transcribe(file: file, settings: settings, key: key, hints: hints)
+        if RecognitionHints.isEcho(raw, hints: hints) {
+            // The model recited the hint list instead of the speech; listen again without it.
+            try Task.checkCancellation()
+            raw = try await SpeechTranscription.transcribe(file: file, settings: settings, key: key, hints: [])
+        }
+        if RecognitionHints.isEcho(raw, hints: hints) { throw TalkError("沒有辨識到文字，請再試一次。") }
+        return raw
+    }
+
+    // MARK: Saved recordings
+
+    let recordings = RecordingStore(folder: LocalStore().directory.appendingPathComponent("Recordings", isDirectory: true))
+    @Published private(set) var retrying: Set<UUID> = []
+    /// The record of this session's failure, so the panel can offer to run it again.
+    @Published private(set) var failedRecordID: UUID?
+    var failedCount: Int { history.filter { $0.failure != nil }.count }
+    @Published private(set) var recordingBytes: Int64 = 0
+
+    /// Deletes expired recordings and those whose record is gone.
+    func pruneRecordings() {
+        let infos = history.map { RecordingInfo(id: $0.id, date: $0.date, failed: $0.failure != nil) }
+        for id in settings.recordingRetention.stale(files: recordings.ids, records: infos) { recordings.remove(id) }
+        recordingBytes = recordings.totalBytes
+    }
+
+    func removeAllRecordings() { recordings.removeAll(); recordingBytes = 0 }
+
+    func hasRecording(_ record: DictationRecord) -> Bool { recordings.has(record.id) }
+
+    /// Runs a saved recording through the current speech and text settings again.
+    /// The result is copied, or written to today's Hyday journal for Hyday entries.
+    func retryFailed() {
+        guard let id = failedRecordID, let record = history.first(where: { $0.id == id }) else { return }
+        retry(record, inPanel: true)
+    }
+
+    /// From the panel, the result goes where the dictation was meant to go, as it would have the first time.
+    func retry(_ record: DictationRecord, inPanel: Bool = false) {
+        guard recordings.has(record.id), !retrying.contains(record.id), !(inPanel && phase.busy) else { return }
+        retrying.insert(record.id)
+        let panelTarget = inPanel ? target : nil
+        if inPanel { notice = ""; result = ""; missedInsertion = false; phase = .transcribing; onPanelChange?() }
+        let snapshot = settings
+        let hints = RecognitionHints.terms(dictionary: snapshot.dictionary, vocabulary: hydayVocabulary)
+        Task {
+            defer { retrying.remove(record.id) }
+            var updated = record
+            do {
+                if record.action == .hyday, hydayRoot == nil { throw TalkError("找不到 Hyday 資料夾，請到 Hyday 頁重新設定。") }
+                let raw = try await transcribeRecording(recordings.url(for: record.id), settings: snapshot, hints: hints)
+                let cleaned = TextProcessing.clean(raw, settings: snapshot)
+                var output = cleaned
+                if snapshot.requiresTextModel(for: record.action) && snapshot.textBackend != .basic,
+                   let processed = try? await process(text: cleaned, selection: "", action: record.action, settings: snapshot) {
+                    output = record.action == .dictate ? ((try? TextProcessing.checkedDictationOutput(processed, source: cleaned)) ?? cleaned) : processed
+                }
+                output = TextProcessing.formatOutput(output, action: record.action, settings: snapshot)
+                if record.action == .hyday, let root = hydayRoot {
+                    let entry = HydayEntryFormatting.stamped(HydayVault.bullet(output), time: HydayEntryFormatting.time(record.date))
+                    try await Task.detached(priority: .userInitiated) { try HydayVault(root: root).appendToJournal(entry) }.value
+                    output = entry; notice = "已重新處理，並記到 Hyday 今天的日誌。"
+                } else if inPanel, snapshot.autoInsert, record.action != .ask,
+                          let message = try? await TextInsertion.insert(output, target: panelTarget) {
+                    notice = "已重新處理。" + message
+                } else if inPanel {
+                    missedInsertion = record.action != .ask
+                    notice = "已重新處理，文字已保留供複製。"
+                } else { TextInsertion.copy(output); notice = "已重新處理，文字已複製。" }
+                if inPanel { result = output; failedRecordID = nil; phase = missedInsertion || record.action == .ask ? .done : .idle; onPanelChange?() }
+                updated.rawText = raw; updated.text = output; updated.backend = snapshot.speechBackend; updated.failure = nil
+                if !snapshot.recordingRetention.keeps(failed: false, savesHistory: snapshot.saveHistory) { recordings.remove(record.id) }
+            } catch {
+                updated.failure = error.localizedDescription
+                notice = "重新處理失敗：" + error.localizedDescription
+                if inPanel { phase = .failed; onPanelChange?() }
+            }
+            if let index = history.firstIndex(where: { $0.id == record.id }) { history[index] = updated; saveHistory() }
+            pruneRecordings()
         }
     }
 
@@ -428,8 +536,8 @@ final class AppModel: ObservableObject {
     }
     func dismissPanel() { if phase.busy { cancel() } else { phase = .idle; onPanelChange?() } }
     func copyResult() { guard !result.isEmpty else { return }; TextInsertion.copy(result); notice = "已複製文字。" }
-    func removeRecord(_ id: UUID) { history.removeAll { $0.id == id }; saveHistory() }
-    func clearHistory() { history = []; saveHistory() }
+    func removeRecord(_ id: UUID) { history.removeAll { $0.id == id }; saveHistory(); recordings.remove(id); pruneRecordings() }
+    func clearHistory() { history = []; saveHistory(); pruneRecordings() }
     func report(_ error: Error) { notice = error.localizedDescription }
     var todayRecords: [DictationRecord] { history.filter { Calendar.current.isDateInToday($0.date) } }
 

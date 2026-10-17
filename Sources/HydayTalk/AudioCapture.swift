@@ -74,11 +74,11 @@ final class AudioCapture {
                     }
                 }
             }
-        } else {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("HydayTalk-\(getpid())-" + UUID().uuidString, isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            directory = folder
         }
+        // Every backend writes the audio, so a failed transcription can be retried from it.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("HydayTalk-\(getpid())-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        directory = folder
         let input = engine.inputNode; let format = input.outputFormat(forBus: 0)
         MeterDiagnostics.shared.start(sampleRate: format.sampleRate, channels: format.channelCount)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -136,6 +136,25 @@ final class AudioCapture {
         let output = directory.appendingPathComponent("dictation.wav")
         try await SpeechTranscription.normalize(source: directory.appendingPathComponent("capture.caf"), output: output)
         return output
+    }
+
+    /// Transcribes a saved recording with the system recognizer, for retries.
+    static func systemTranscript(of file: URL, settings: TalkSettings, hints: [String]) async throws -> String {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: settings.locale)), recognizer.isAvailable else {
+            throw TalkError("系統語音辨識暫時無法使用。請確認網路，或切換辨識來源。")
+        }
+        let request = SFSpeechURLRecognitionRequest(url: file)
+        request.requiresOnDeviceRecognition = settings.systemOfflineOnly
+        request.addsPunctuation = true
+        request.contextualStrings = hints
+        return try await withCheckedThrowingContinuation { continuation in
+            var finished = false
+            recognizer.recognitionTask(with: request) { result, error in
+                guard !finished else { return }
+                if let error { finished = true; continuation.resume(throwing: TalkError("系統辨識失敗：\(error.localizedDescription)")) }
+                else if let result, result.isFinal { finished = true; continuation.resume(returning: result.bestTranscription.formattedString) }
+            }
+        }
     }
 
     func cancel() {

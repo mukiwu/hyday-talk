@@ -52,7 +52,7 @@ private struct VoicePanelContent: View {
     var body: some View {
         VoiceBarView(state: VoiceBarState(model: model), expanded: $presentation.expanded,
             actions: VoiceBarActions(finish: model.finish, dismiss: model.dismissPanel, copy: model.copyResult,
-                openMain: { model.dismissPanel(); model.showWindow?() }, resize: onSizeChange))
+                openMain: { model.dismissPanel(); model.showWindow?() }, retry: model.retryFailed, resize: onSizeChange))
             .onChange(of: model.phase) { _, _ in onSizeChange() }
     }
 }
@@ -67,6 +67,7 @@ struct VoiceBarState {
     var action: VoiceAction = .dictate
     var destination = "結果區"
     var missedInsertion = false
+    var canRetry = false
     var actionTitle: String { action.title }
 }
 
@@ -74,7 +75,7 @@ extension VoiceBarState {
     @MainActor init(model: AppModel) {
         self.init(phase: model.phase, elapsed: model.elapsed, level: model.level, transcript: model.transcript,
             result: model.result, notice: model.notice, action: model.action, destination: model.destination,
-            missedInsertion: model.missedInsertion)
+            missedInsertion: model.missedInsertion, canRetry: model.phase == .failed && model.failedRecordID != nil)
     }
 }
 
@@ -83,6 +84,7 @@ struct VoiceBarActions {
     var dismiss: () -> Void = {}
     var copy: () -> Void = {}
     var openMain: () -> Void = {}
+    var retry: () -> Void = {}
     var resize: () -> Void = {}
 }
 
@@ -225,6 +227,9 @@ struct VoiceBarView: View {
             }
             if terminal {
                 HStack(spacing: 8) {
+                    if state.canRetry {
+                        Button("重新處理", action: actions.retry).buttonStyle(AlignButtonStyle(kind: .primary)).controlSize(.regular)
+                    }
                     if state.missedInsertion, !state.result.isEmpty {
                         Button("複製文字", action: actions.copy).buttonStyle(AlignButtonStyle(kind: .primary)).controlSize(.regular)
                     }
