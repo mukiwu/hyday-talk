@@ -428,7 +428,9 @@ final class AppModel: ObservableObject {
                 guard sessionID == current else { return }
                 if saved != nil {
                     // Kept with the error, so the history page can run it again without speaking twice.
-                    history.insert(DictationRecord(id: recordID, rawText: heard, text: heard, action: voiceAction, backend: snapshot.speechBackend,
+                    // Without saved history, the record holds only what a retry needs, never the words.
+                    let words = snapshot.saveHistory ? heard : ""
+                    history.insert(DictationRecord(id: recordID, rawText: words, text: words, action: voiceAction, backend: snapshot.speechBackend,
                         duration: duration, destination: voiceAction == .hyday ? "Hyday" : (inputTarget?.name ?? "結果區"),
                         failure: error.localizedDescription), at: 0)
                     history = Array(history.prefix(200)); saveHistory(); pruneRecordings()
@@ -524,7 +526,12 @@ final class AppModel: ObservableObject {
                 notice = "重新處理失敗：" + error.localizedDescription
                 if inPanel { phase = .failed; onPanelChange?() }
             }
-            if let index = history.firstIndex(where: { $0.id == record.id }) { history[index] = updated; saveHistory() }
+            if let index = history.firstIndex(where: { $0.id == record.id }) {
+                // A retried failure stays only as long as text history is on.
+                if updated.failure == nil && !snapshot.saveHistory { history.remove(at: index); recordings.remove(record.id) }
+                else { history[index] = updated }
+                saveHistory()
+            }
             pruneRecordings()
         }
     }
