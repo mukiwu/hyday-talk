@@ -131,7 +131,7 @@ struct SpeechSettingsView: View {
                 LocalModelSettingsView(model: model, manager: model.localModels)
             case .api:
                 SettingsGroup(title: "語音辨識 API", detail: "錄音會傳送至你設定的服務。支援 /audio/transcriptions；本機相容服務可不填 Key。") {
-                    SettingsBlock { APISettingsFields(settings: $model.settings.speechAPI, account: "speech", model: model) }
+                    SettingsBlock { APISettingsFields(settings: $model.settings.speechAPI, account: "speech", purpose: .speech, model: model) }
                 }
             }
             SettingsGroup(title: "語音辨識語言") {
@@ -164,7 +164,7 @@ struct TextSettingsView: View {
                 ClaudeTextSettingsView(model: model)
             case .api:
                 SettingsGroup(title: "文字 AI API", detail: "逐字稿、個人辭典與提問時選取的文字會送至這個服務。支援 /chat/completions，也可連接本機模型服務。") {
-                    SettingsBlock { APISettingsFields(settings: $model.settings.textAPI, account: "text", model: model) }
+                    SettingsBlock { APISettingsFields(settings: $model.settings.textAPI, account: "text", purpose: .text, model: model) }
                 }
             }
             SettingsGroup(title: "聽寫風格", detail: "設定會自動儲存，於下一次聽寫套用。") {
@@ -386,11 +386,27 @@ struct GeneralSettingsView: View {
 struct APISettingsFields: View {
     @Binding var settings: APISettings
     let account: String
+    let purpose: APIProvider.Purpose
     @ObservedObject var model: AppModel
     @State private var key = ""
     @State private var saved = false
+    private var provider: Binding<APIProvider> {
+        // A known address this purpose does not offer, such as Groq for text, shows as custom.
+        Binding(get: { [settings, purpose] in
+                    let match = APIProvider.matching(baseURL: settings.baseURL)
+                    return APIProvider.choices(for: purpose).contains(match) ? match : .custom },
+                set: { $0.apply(to: &settings, for: purpose) })
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 7) {
+                AlignMenuPicker(title: "服務", values: APIProvider.choices(for: purpose), selection: provider,
+                                label: { $0.title }).frame(width: 220)
+                if let page = provider.wrappedValue.keyPage {
+                    Link("取得 \(provider.wrappedValue.title) API Key", destination: page)
+                        .font(Typography.font(.caption)).pointingCursor()
+                }
+            }
             LabeledField("服務基底網址", placeholder: "https://api.openai.com/v1", text: $settings.baseURL, monospaced: true)
             LabeledField("模型名稱", placeholder: "服務提供的模型名稱", text: $settings.model, monospaced: true)
             VStack(alignment: .leading, spacing: 7) {
