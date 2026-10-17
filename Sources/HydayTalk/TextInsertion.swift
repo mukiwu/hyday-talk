@@ -29,8 +29,8 @@ enum TextInsertion {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             MainActor.assumeIsolated { remember(app) }
         }
-        // Remember the foreground app's field (see FocusMemory). Retain only its AX
-        // reference; selected text is read only when a recording starts.
+        // Remember the foreground app's field for when our own window comes forward.
+        // Retain only its AX reference; selected text is read only when a recording starts.
         let timer = Timer(timeInterval: 0.2, repeats: true) { _ in
             MainActor.assumeIsolated {
                 if let app = NSWorkspace.shared.frontmostApplication { remember(app) }
@@ -47,11 +47,25 @@ enum TextInsertion {
 
     static func forgetDestination() { previousExternalApplication = nil; previousExternalElement = nil }
 
+    private static var accessibleApps: Set<pid_t> = []
+
+    /// Electron and other Chromium apps build their accessibility tree only after a
+    /// client sets AXManualAccessibility; until then they report no focused field.
+    /// Other apps ignore the attribute.
+    private static func enableAccessibility(_ pid: pid_t) {
+        guard !accessibleApps.contains(pid) else { return }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 1)
+        let error = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        logger.notice("AXManualAccessibility pid=\(pid) AXError=\(error.rawValue)")
+        // Apps that do not support the attribute will not start to; stop asking them.
+        if error == .success || error == .attributeUnsupported || error == .illegalArgument { accessibleApps.insert(pid) }
+    }
+
     private static func remember(_ app: NSRunningApplication) {
         if app.processIdentifier != ProcessInfo.processInfo.processIdentifier && !app.isTerminated {
-            previousExternalElement = FocusMemory.remembered(previous: previousExternalElement,
-                previousPID: previousExternalApplication?.processIdentifier,
-                reported: focusedElement(pid: app.processIdentifier), pid: app.processIdentifier)
+            enableAccessibility(app.processIdentifier)
+            previousExternalElement = focusedElement(pid: app.processIdentifier)
             previousExternalApplication = app
         }
     }
@@ -156,10 +170,11 @@ enum TextInsertion {
     static func copy(_ text: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
     }
-    /// The field to dictate into, chosen by FocusMemory; capture and insertion both use it.
+    /// The app's focused field; while our own window is in front, the field remembered before it.
     private static func field(pid: pid_t, remembered: AXUIElement?) -> AXUIElement? {
-        FocusMemory.field(reported: focusedElement(pid: pid), remembered: remembered,
-                          rememberedHasFocus: remembered.flatMap { attribute($0, kAXFocusedAttribute) as? Bool } == true)
+        if let focused = focusedElement(pid: pid) { return focused }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+            ? remembered : nil
     }
 
     private static func focusedElement(pid: pid_t) -> AXUIElement? {
