@@ -72,14 +72,19 @@ public enum AppInstaller {
         return manager.isWritableFile(atPath: installed.deletingLastPathComponent().path) && manager.isWritableFile(atPath: installed.path)
     }
 
+    /// The code requirement the swapped-in copy must meet: a Developer ID signature from `team`.
+    /// The team is quoted because an unquoted identifier starting with a digit is a syntax error.
+    public static func signingRequirement(team: String) -> String {
+        #"anchor apple generic and certificate leaf[subject.OU] = "\#(team)""#
+    }
+
     /// Starts a detached script that waits for `pid` to exit, swaps `staged` into `installed` and opens
     /// the result with `launcher`. The copy that lands in place is checked again against `team`, since
     /// the staged files could change after `verify`; on any failure the old copy is restored.
     /// `team` is nil only in tests, where the fixtures are unsigned.
     public static func replaceAfterExit(pid: Int32, staged: URL, installed: URL, team: String?,
                                         launcher: String = "/usr/bin/open") throws {
-        let check = team == nil ? "true"
-            : #"codesign --verify --deep --strict -R="anchor apple generic and certificate leaf[subject.OU] = "$5"" "$3""#
+        let check = team == nil ? "true" : #"codesign --verify --deep --strict -R="$5" "$3""#
         let script = """
         while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
         backup="$3.previous-$$"
@@ -90,7 +95,8 @@ public enum AppInstaller {
         """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script, "hyday-update", String(pid), staged.path, installed.path, launcher, team ?? ""]
+        process.arguments = ["-c", script, "hyday-update", String(pid), staged.path, installed.path, launcher,
+                             team.map(signingRequirement) ?? ""]
         process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
         try process.run()
     }

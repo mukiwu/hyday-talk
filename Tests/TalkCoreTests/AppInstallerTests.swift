@@ -119,4 +119,17 @@ final class AppInstallerIdentityTests: XCTestCase {
         while !FileManager.default.fileExists(atPath: launched.path), Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
         XCTAssertEqual(try String(contentsOf: installed.appendingPathComponent("Contents/marker"), encoding: .utf8), "old")
     }
+
+    /// A team ID starting with a digit, like ours, must still compile into a valid requirement;
+    /// a requirement that fails to parse made every swap roll back to the old version.
+    func testSigningRequirementCompilesForADigitLeadingTeam() throws {
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: output) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/csreq")
+        process.arguments = ["-r=" + AppInstaller.signingRequirement(team: "62629DYRU8"), "-b", output.path]
+        process.standardError = FileHandle.nullDevice
+        try process.run(); process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+    }
 }
