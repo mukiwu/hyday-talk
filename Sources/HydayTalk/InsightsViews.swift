@@ -389,24 +389,31 @@ struct SessionDots: View {
         let average = sessions.isEmpty ? 0 : sessions.reduce(0, +) / Double(sessions.count)
         VStack(alignment: .leading, spacing: 8) {
             GeometryReader { proxy in
-                let width = proxy.size.width
+                let width = proxy.size.width, height = proxy.size.height
+                let top: CGFloat = 26 // room for the average tag above the tallest stack
+                let count = max(1, Int(width / 9))
                 // Stack dots that land in the same column, like a dot plot.
-                let columns = Dictionary(grouping: sessions.indices) { Int(sessions[$0] / limit * Double(max(1, Int(width / 9)))) }
+                let columns = Dictionary(grouping: sessions.indices) { min(count - 1, Int(sessions[$0] / limit * Double(count))) }
+                let tallest = CGFloat(columns.values.map(\.count).max() ?? 1)
+                // Shrink the vertical step when a column would otherwise rise past the chart.
+                let step = min(9, (height - top) / tallest)
+                let dot = max(2, min(7, step - 1.5))
+                let pitch = width / CGFloat(count)
                 ZStack(alignment: .bottomLeading) {
                     ForEach(Array(columns.keys), id: \.self) { column in
                         ForEach(Array(columns[column, default: []].enumerated()), id: \.offset) { stack, _ in
-                            Circle().fill(Palette.action.opacity(0.75)).frame(width: 7, height: 7)
-                                .position(x: CGFloat(column) * 9 + 4, y: 100 - CGFloat(stack) * 9 - 4)
+                            Circle().fill(Palette.action.opacity(0.75)).frame(width: dot, height: dot)
+                                .position(x: CGFloat(column) * pitch + pitch / 2, y: height - CGFloat(stack) * step - step / 2)
                         }
                     }
                     if !sessions.isEmpty {
                         let x = width * CGFloat(average / limit)
-                        Path { path in path.move(to: CGPoint(x: x, y: 10)); path.addLine(to: CGPoint(x: x, y: 100)) }
+                        Path { path in path.move(to: CGPoint(x: x, y: top)); path.addLine(to: CGPoint(x: x, y: height)) }
                             .stroke(Palette.accent, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                        ChartTag(text: String(format: "平均 %.0f 秒", average)).position(x: min(max(x, 44), width - 44), y: 4)
+                        ChartTag(text: String(format: "平均 %.0f 秒", average)).position(x: min(max(x, 44), width - 44), y: top / 2)
                     }
                 }
-            }.frame(height: 100)
+            }.frame(height: 160)
             HStack {
                 Text("0 秒"); Spacer(); Text(String(format: "%.0f 秒", limit))
             }.font(Typography.font(.caption)).foregroundStyle(Palette.muted)
