@@ -24,9 +24,14 @@ struct LocalModelSettingsView: View {
                             Label("使用中", systemImage: "checkmark.circle.fill")
                                 .font(Typography.font(.caption, weight: .medium)).foregroundStyle(Palette.action).fixedSize()
                         } else if let url {
-                            Button("使用此模型") { select(url) }.buttonStyle(AlignButtonStyle())
-                                .accessibilityLabel("使用 \(candidate.title)")
-                                .disabled(manager.busyModelID != nil || !manager.engineReady(for: candidate.filename))
+                            HStack(spacing: 8) {
+                                Button("刪除模型") { pendingDeletion = candidate }.buttonStyle(AlignButtonStyle(kind: .destructive))
+                                    .accessibilityLabel("刪除 \(candidate.title)")
+                                    .disabled(manager.busyModelID != nil)
+                                Button("使用此模型") { select(url) }.buttonStyle(AlignButtonStyle())
+                                    .accessibilityLabel("使用 \(candidate.title)")
+                                    .disabled(manager.busyModelID != nil || !manager.engineReady(for: candidate.filename))
+                            }.fixedSize()
                         } else {
                             Button("下載並使用") { manager.download(candidate, onSelect: select) }.buttonStyle(AlignButtonStyle(kind: .primary))
                                 .accessibilityLabel("下載並使用 \(candidate.title)")
@@ -47,13 +52,8 @@ struct LocalModelSettingsView: View {
                             Button("取消", action: manager.cancel).buttonStyle(AlignButtonStyle())
                         }.padding(.bottom, 14)
                     } else if url != nil && !selected {
-                        HStack(spacing: 10) {
-                            Label("已可使用", systemImage: "checkmark.circle").font(Typography.font(.caption)).foregroundStyle(Palette.muted)
-                            Spacer()
-                            Button("刪除模型") { pendingDeletion = candidate }.buttonStyle(AlignButtonStyle())
-                                .accessibilityLabel("刪除 \(candidate.title)")
-                                .disabled(manager.busyModelID != nil)
-                        }.padding(.bottom, 14)
+                        Label("已可使用", systemImage: "checkmark.circle").font(Typography.font(.caption)).foregroundStyle(Palette.muted)
+                            .padding(.bottom, 14)
                     }
                 }
             }
