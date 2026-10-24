@@ -84,6 +84,15 @@ final class LocalSpeechModelManager: ObservableObject {
         }
     }
 
+    /// Removes an installed model file. The caller keeps the selected model out of reach.
+    func delete(_ model: LocalSpeechModel) {
+        guard busyModelID == nil, let url = installed[model.id] else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+            installed[model.id] = nil; issue = ""
+        } catch { issue = "無法刪除模型檔案，請確認檔案權限後重試。" }
+    }
+
     /// Downloads with up to three resumes, continuing from the bytes already received when the connection drops.
     private static func fetch(_ request: URLRequest, delegate: URLSessionTaskDelegate) async throws -> (URL, URLResponse) {
         var resumeData: Data?

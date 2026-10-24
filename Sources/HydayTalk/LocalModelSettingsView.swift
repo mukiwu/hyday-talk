@@ -4,6 +4,7 @@ import TalkCore
 struct LocalModelSettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var manager: LocalSpeechModelManager
+    @State private var pendingDeletion: LocalSpeechModel?
 
     var body: some View {
         SettingsGroup(title: "選擇本機語音模型", detail: "模型在這台 Mac 辨識語音，錄音不會上傳。") {
@@ -46,8 +47,13 @@ struct LocalModelSettingsView: View {
                             Button("取消", action: manager.cancel).buttonStyle(AlignButtonStyle())
                         }.padding(.bottom, 14)
                     } else if url != nil && !selected {
-                        Label("已可使用", systemImage: "checkmark.circle").font(Typography.font(.caption)).foregroundStyle(Palette.muted)
-                            .padding(.bottom, 14)
+                        HStack(spacing: 10) {
+                            Label("已可使用", systemImage: "checkmark.circle").font(Typography.font(.caption)).foregroundStyle(Palette.muted)
+                            Spacer()
+                            Button("刪除模型") { pendingDeletion = candidate }.buttonStyle(AlignButtonStyle())
+                                .accessibilityLabel("刪除 \(candidate.title)")
+                                .disabled(manager.busyModelID != nil)
+                        }.padding(.bottom, 14)
                     }
                 }
             }
@@ -57,6 +63,14 @@ struct LocalModelSettingsView: View {
                         .font(Typography.font(.caption)).foregroundStyle(Palette.ink)
                 }
             }
+        }
+        .confirmationDialog("要刪除 \(pendingDeletion?.title ?? "") 嗎？", isPresented: Binding(
+            get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }
+        ), titleVisibility: .visible, presenting: pendingDeletion) { candidate in
+            Button("刪除", role: .destructive) { manager.delete(candidate) }
+            Button("取消", role: .cancel) {}
+        } message: { candidate in
+            Text("刪除後可釋放 \(candidate.sizeLabel) 的空間。如需再次使用，可重新下載。")
         }
     }
     private func select(_ url: URL) {
