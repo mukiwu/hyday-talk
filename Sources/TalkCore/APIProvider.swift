@@ -3,7 +3,7 @@ import Foundation
 /// Common OpenAI-compatible services offered in the API settings, so users pick a name
 /// instead of remembering an address. Picking one fills its address and a suggested model.
 public enum APIProvider: String, CaseIterable, Identifiable, Sendable {
-    case openAI, gemini, groq, custom
+    case openAI, gemini, claude, groq, custom
     public enum Purpose: Sendable { case speech, text }
 
     public var id: String { rawValue }
@@ -11,6 +11,7 @@ public enum APIProvider: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openAI: return "OpenAI"
         case .gemini: return "Google Gemini"
+        case .claude: return "Claude"
         case .groq: return "Groq"
         case .custom: return "自訂"
         }
@@ -19,6 +20,7 @@ public enum APIProvider: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openAI: return "https://api.openai.com/v1"
         case .gemini: return "https://generativelanguage.googleapis.com/v1beta/openai/"
+        case .claude: return "https://api.anthropic.com/v1/"
         case .groq: return "https://api.groq.com/openai/v1"
         case .custom: return nil
         }
@@ -28,6 +30,7 @@ public enum APIProvider: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .openAI: return URL(string: "https://platform.openai.com/api-keys")
         case .gemini: return URL(string: "https://aistudio.google.com/apikey")
+        case .claude: return URL(string: "https://platform.claude.com/settings/keys")
         case .groq: return URL(string: "https://console.groq.com/keys")
         case .custom: return nil
         }
@@ -38,6 +41,7 @@ public enum APIProvider: String, CaseIterable, Identifiable, Sendable {
         case (.openAI, .speech): return "gpt-transcribe"
         case (.openAI, .text): return "gpt-4.1-mini"
         case (.gemini, .text): return "gemini-3.5-flash-lite"
+        case (.claude, .text): return "claude-haiku-5-5"
         case (.groq, .speech): return "whisper-large-v3-turbo"
         default: return nil
         }

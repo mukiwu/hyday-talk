@@ -4,7 +4,7 @@ import XCTest
 final class APIProviderTests: XCTestCase {
     func testEachPurposeListsOnlyServicesThatSupportIt() {
         XCTAssertEqual(APIProvider.choices(for: .speech), [.openAI, .groq, .custom])
-        XCTAssertEqual(APIProvider.choices(for: .text), [.openAI, .gemini, .custom])
+        XCTAssertEqual(APIProvider.choices(for: .text), [.openAI, .gemini, .claude, .custom])
     }
 
     func testPickingAServiceFillsItsAddressAndModel() {
@@ -26,6 +26,7 @@ final class APIProviderTests: XCTestCase {
     func testRecognisesASavedAddressIgnoringATrailingSlash() {
         XCTAssertEqual(APIProvider.matching(baseURL: "https://generativelanguage.googleapis.com/v1beta/openai"), .gemini)
         XCTAssertEqual(APIProvider.matching(baseURL: " https://api.openai.com/v1/ "), .openAI)
+        XCTAssertEqual(APIProvider.matching(baseURL: "https://api.anthropic.com/v1"), .claude)
         XCTAssertEqual(APIProvider.matching(baseURL: "http://localhost:8080/v1"), .custom)
     }
 }
