@@ -8,4 +8,13 @@ public enum InputApplicationRouting {
         guard let previousExternalPID, previousExternalPID > 0, previousExternalPID != recorderPID else { return nil }
         return previousExternalPID
     }
+
+    /// Apps that draw their own text and report only a window as the focused element,
+    /// so no text field can be detected. Pasting still works in them.
+    static let windowOnlyPasteApps: Set<String> = ["dev.herdr.app"]
+
+    public static func acceptsPasteWithoutTextField(bundleID: String?, focusedRole: String) -> Bool {
+        guard let bundleID, focusedRole == "AXWindow" else { return false }
+        return windowOnlyPasteApps.contains(bundleID)
+    }
 }

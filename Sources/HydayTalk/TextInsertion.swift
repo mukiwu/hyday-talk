@@ -85,6 +85,7 @@ enum TextInsertion {
         if let element { AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) }
         let secure = subrole == kAXSecureTextFieldSubrole
         let editable = settable.boolValue || [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role)
+            || InputApplicationRouting.acceptsPasteWithoutTextField(bundleID: app.bundleIdentifier, focusedRole: role)
         logger.notice("Capture foreground=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) target=\(pid) role=\(role, privacy: .public) cached=\(cachedElement != nil) editable=\(editable) secure=\(secure)")
         return InputTarget(pid: app.processIdentifier, name: app.localizedName ?? "目前 App", element: element,
             selection: secure ? "" : (element.flatMap { attribute($0, kAXSelectedTextAttribute) as? String } ?? ""),
